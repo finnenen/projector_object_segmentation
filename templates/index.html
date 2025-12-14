@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Object Segmentation - Layer Editor</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #ddd;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            font-weight: 300;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        /* Section 1: Original Image */
+        .image-preview {
+            background: #000;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+            position: relative;
+        }
+
+        .image-preview img {
+            max-width: 100%;
+            max-height: 300px;
+            display: block;
+        }
+
+        .camera-btn {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            font-size: 20px;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .camera-btn:hover {
+            background: rgba(0, 0, 0, 0.8);
+            transform: scale(1.05);
+        }
+
+        /* Section 2: Search Bar */
+        .search-bar {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+            max-width: 600px;
+            background: #2d2d2d;
+            padding: 10px;
+            border-radius: 50px;
+            /* Pill shape */
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .search-bar input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-size: 16px;
+            padding: 10px 15px;
+            outline: none;
+        }
+
+        .search-bar button {
+            background-color: #007acc;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .search-bar button:hover {
+            background-color: #005fa3;
+        }
+
+        .search-bar button:disabled {
+            background-color: #555;
+            cursor: wait;
+        }
+
+        /* Section 3: Editor */
+        #editor-section {
+            display: none;
+            /* Hidden until search */
+            width: 100%;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            animation: fadeIn 0.5s ease;
+            position: relative;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: #333;
+            padding: 10px 20px;
+            border-radius: 8px;
+            width: 100%;
+            box-sizing: border-box;
+            justify-content: center;
+            position: sticky;
+            top: 10px;
+            z-index: 100;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .layer-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.2em;
+        }
+
+        #hover-label {
+            font-weight: bold;
+            color: #4db8ff;
+            text-shadow: 0 0 5px rgba(77, 184, 255, 0.5);
+        }
+
+        canvas {
+            background-image: linear-gradient(45deg, #2a2a2a 25%, transparent 25%),
+                linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
+                linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
+            background-size: 20px 20px;
+            background-color: #1a1a1a;
+            border: 2px solid #444;
+            cursor: pointer;
+            max-width: 100%;
+            height: auto;
+            transition: box-shadow 0.2s;
+        }
+
+        canvas:hover {
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Popup Styles */
+        #popup-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .popup-content {
+            background: #2d2d2d;
+            padding: 30px;
+            border-radius: 12px;
+            width: 400px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            position: relative;
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes popIn {
+            from {
+                transform: scale(0.8);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .popup-header {
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            color: #fff;
+            border-bottom: 1px solid #444;
+            padding-bottom: 10px;
+        }
+
+        .popup-options {
+            display: flex;
+            justify-content: space-around;
+            gap: 20px;
+        }
+
+        .option-card {
+            flex: 1;
+            background: #3a3a3a;
+            padding: 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .option-card:hover {
+            transform: translateY(-5px);
+            background: #444;
+        }
+
+        .option-icon {
+            font-size: 2em;
+            margin-bottom: 5px;
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #aaa;
+        }
+
+        .close-btn:hover {
+            color: #fff;
+        }
+
+        /* Hidden inputs */
+        #popup-color-input,
+        #popup-file-input {
+            display: none;
+        }
+
+        .action-btn {
+            padding: 12px 30px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .action-btn:hover {
+            background-color: #218838;
+        }
+
+        #loading {
+            display: none;
+            color: #aaa;
+        }
+
+        #error-msg {
+            color: #ff6b6b;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Object Segmentation Studio</h1>
+
+    <div class="container">
+
+        <!-- 1. Original Image -->
+        <div class="image-preview">
+            <img src="{{ url_for('static', filename=original_image) }}" id="original-img" alt="Original">
+            <button class="camera-btn" onclick="document.getElementById('imageInput').click()" title="Change Image">
+                📷
+            </button>
+            <input type="file" id="imageInput" accept="image/*" style="display: none;" onchange="uploadImage()">
+        </div>
+
+        <!-- 2. Search -->
+        <div class="search-bar">
+            <input type="text" id="classes-input" placeholder="Enter classes (e.g. couch, laptop)..."
+                value="couch, laptop">
+            <button onclick="performSearch()" id="btn-search" title="Search">
+                <!-- Magnifying Glass Icon -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+            </button>
+        </div>
+
+        <div id="loading">Analyzing image...</div>
+        <div id="error-msg"></div>
+
+        <!-- 3. Editor -->
+        <div id="editor-section">
+            <div class="toolbar">
+                <div class="layer-info">
+                    <span>Hovering:</span>
+                    <span id="hover-label">None</span>
+                </div>
+            </div>
+
+            <canvas id="main-canvas"></canvas>
+
+            <div class="action-bar" style="display: flex; gap: 10px; margin-top: 10px;">
+                <button class="action-btn" onclick="toggleCropMode()">Crop Image</button>
+                <button class="action-btn" onclick="downloadResult()">Extract Image</button>
+            </div>
+
+            <!-- Crop Controls -->
+            <div id="crop-controls"
+                style="display: none; background: #333; padding: 15px; border-radius: 8px; margin-top: 10px; gap: 15px; align-items: center;">
+                <span style="font-weight: bold;">Crop Format:</span>
+                <button class="crop-btn" onclick="setCropRatio(null)">Free</button>
+                <button class="crop-btn" onclick="setCropRatio(16/9)">16:9</button>
+                <button class="crop-btn" onclick="setCropRatio(4/3)">4:3</button>
+                <button class="crop-btn" onclick="setCropRatio(1)">1:1</button>
+
+                <span style="margin-left: 10px;">Scale:</span>
+                <input type="range" id="crop-scale" min="0.1" max="1" step="0.05" value="0.8"
+                    oninput="updateCropScale(this.value)">
+
+                <button class="action-btn" style="background-color: #007acc; margin-left: auto;"
+                    onclick="applyCrop()">Apply</button>
+                <button class="action-btn" style="background-color: #666;" onclick="cancelCrop()">Cancel</button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Popup Modal -->
+    <div id="popup-overlay" onclick="closePopup(event)">
+        <div class="popup-content" onclick="event.stopPropagation()">
+            <span class="close-btn" onclick="closePopup()">&times;</span>
+            <div class="popup-header" id="popup-title">Edit Layer</div>
+
+            <div class="popup-options">
+                <!-- Option 1: Color -->
+                <div class="option-card" onclick="triggerColorPicker()">
+                    <div class="option-icon">🎨</div>
+                    <div>Solid Color</div>
+                </div>
+
+                <!-- Option 2: Texture -->
+                <div class="option-card" onclick="triggerFilePicker()">
+                    <div class="option-icon">🖼️</div>
+                    <div>Image Texture</div>
+                </div>
+            </div>
+
+            <input type="color" id="popup-color-input" onchange="applyColor(this.value)">
+            <input type="file" id="popup-file-input" accept="image/*" onchange="applyTexture(this)">
+        </div>
+    </div>
+
+    <style>
+        .crop-btn {
+            background: #444;
+            color: white;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .crop-btn:hover {
+            background: #555;
+        }
+    </style>
+
+    <script>
+        // State
+        let layers = []; // { id, type: 'bg'|'object', label, img: Image, color: hex, texture: Image, bbox: {x,y,w,h} }
+        let hoveredLayerIndex = -1;
+        let selectedLayerIndex = -1; // For popup context
+        let canvas, ctx;
+        let originalWidth = 0, originalHeight = 0;
+
+        // Crop State
+        let isCropMode = false;
+        let cropRect = { x: 0, y: 0, w: 0, h: 0 };
+        let cropRatio = null; // null = free
+        let isDraggingCrop = false;
+        let dragStart = { x: 0, y: 0 };
+        let cropStart = { x: 0, y: 0 };
+        let finalCropRect = null; // Stores the applied crop
+        let currentFilename = "{{ original_image }}";
+
+        // Initialize
+        window.onload = () => {
+            canvas = document.getElementById('main-canvas');
+            ctx = canvas.getContext('2d');
+
+            // Setup Canvas Listeners
+            canvas.addEventListener('mousemove', (e) => {
+                if (isCropMode) handleCropMove(e);
+                else handleCanvasHover(e);
+            });
+            canvas.addEventListener('mousedown', (e) => {
+                if (isCropMode) handleCropDown(e);
+                else handleCanvasClick(e);
+            });
+            canvas.addEventListener('mouseup', () => {
+                if (isCropMode) isDraggingCrop = false;
+            });
+            canvas.addEventListener('mouseleave', () => {
+                hoveredLayerIndex = -1;
+                isDraggingCrop = false;
+                if (!isCropMode) {
+                    updateHoverLabel();
+                    drawCanvas();
+                }
+            });
+        };
+
+        async function uploadImage() {
+            const input = document.getElementById('imageInput');
+            const file = input.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    currentFilename = data.filename;
+                    // Update image src with timestamp to force reload
+                    document.getElementById('original-img').src = '/static/' + data.filename + '?t=' + new Date().getTime();
+
+                    // Reset Editor
+                    document.getElementById('editor-section').style.display = 'none';
+                    layers = [];
+                    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+                } else {
+                    alert('Upload failed: ' + data.error);
+                }
+            } catch (e) {
+                alert('Upload error: ' + e.message);
+            }
+        }
+
+        async function performSearch() {
+            const classes = document.getElementById('classes-input').value;
+            const btn = document.getElementById('btn-search');
+            const loading = document.getElementById('loading');
+            const errorMsg = document.getElementById('error-msg');
+            const editor = document.getElementById('editor-section');
+
+            btn.disabled = true;
+            loading.style.display = 'block';
+            errorMsg.innerText = '';
+            editor.style.display = 'none';
+
+            try {
+                const response = await fetch('/process', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        classes: classes,
+                        filename: currentFilename
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    await initLayers(data.masks);
+                    editor.style.display = 'flex';
+                } else {
+                    errorMsg.innerText = data.error || 'Unknown error';
+                }
+            } catch (e) {
+                errorMsg.innerText = 'Network error: ' + e.message;
+            } finally {
+                btn.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+
+        async function initLayers(masksData) {
+            layers = [];
+            cropOffset = { x: 0, y: 0 }; // Reset crop
+
+            // 1. Add Background Layer
+            layers.push({
+                type: 'background',
+                label: 'Background',
+                color: '#333333', // Default dark grey
+                img: null,
+                texture: null,
+                bbox: null
+            });
+
+            // 2. Load Object Masks
+            const imagePromises = masksData.map(maskInfo => {
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.src = '/static/' + maskInfo.url;
+                    img.onload = () => resolve({
+                        type: 'object',
+                        label: maskInfo.label,
+                        color: getRandomColor(),
+                        img: img,
+                        texture: null,
+                        bbox: maskInfo.bbox // {x, y, w, h}
+                    });
+                    img.onerror = reject;
+                });
+            });
+
+            const objectLayers = await Promise.all(imagePromises);
+            layers = layers.concat(objectLayers);
+
+            // Set Canvas Size
+            if (objectLayers.length > 0) {
+                originalWidth = objectLayers[0].img.naturalWidth;
+                originalHeight = objectLayers[0].img.naturalHeight;
+                canvas.width = originalWidth;
+                canvas.height = originalHeight;
+            } else {
+                const origImg = document.getElementById('original-img');
+                canvas.width = origImg.naturalWidth || 640;
+                canvas.height = origImg.naturalHeight || 480;
+                originalWidth = canvas.width;
+                originalHeight = canvas.height;
+            }
+
+            drawCanvas();
+        }
+
+        function drawCanvas() {
+            // Clear
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            // Apply Crop Offset
+            ctx.translate(-cropOffset.x, -cropOffset.y);
+
+            // Draw Layers from Bottom to Top
+            layers.forEach((layer, index) => {
+                const isHovered = (index === hoveredLayerIndex);
+
+                ctx.save();
+
+                // Apply Hover Scale (Only for objects)
+                if (isHovered && layer.type === 'object' && layer.bbox) {
+                    const cx = layer.bbox.x + layer.bbox.w / 2;
+                    const cy = layer.bbox.y + layer.bbox.h / 2;
+
+                    ctx.translate(cx, cy);
+                    ctx.scale(1.05, 1.05); // 5% scale up
+                    ctx.translate(-cx, -cy);
+                }
+
+                if (layer.type === 'background') {
+                    if (layer.texture) {
+                        // Draw texture pattern
+                        const pattern = ctx.createPattern(layer.texture, 'repeat');
+                        ctx.fillStyle = pattern;
+                    } else {
+                        ctx.fillStyle = layer.color;
+                    }
+                    // Draw background over the entire ORIGINAL area
+                    ctx.fillRect(0, 0, originalWidth, originalHeight);
+                } else {
+                    // Draw Object Mask
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = originalWidth;
+                    tempCanvas.height = originalHeight;
+                    const tCtx = tempCanvas.getContext('2d');
+
+                    // 1. Draw the mask shape
+                    tCtx.drawImage(layer.img, 0, 0);
+
+                    // 2. Composite: Source-In
+                    tCtx.globalCompositeOperation = 'source-in';
+
+                    if (layer.texture) {
+                        const pattern = tCtx.createPattern(layer.texture, 'repeat');
+                        tCtx.fillStyle = pattern;
+                        tCtx.fillRect(0, 0, originalWidth, originalHeight);
+                    } else {
+                        tCtx.fillStyle = layer.color;
+                        tCtx.fillRect(0, 0, originalWidth, originalHeight);
+                    }
+
+                    // 3. Draw result to main canvas
+                    ctx.drawImage(tempCanvas, 0, 0);
+                }
+
+                ctx.restore();
+            });
+
+            ctx.restore(); // Restore translation
+
+            if (isCropMode) {
+                drawCropOverlay();
+            }
+        }
+
+        function drawCropOverlay() {
+            ctx.save();
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.beginPath();
+            ctx.rect(0, 0, canvas.width, canvas.height);
+            ctx.rect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
+            ctx.clip('evenodd');
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
+        }
+
+        function getHitLayerIndex(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+
+            const x = (e.clientX - rect.left) * scaleX + cropOffset.x;
+            const y = (e.clientY - rect.top) * scaleY + cropOffset.y;
+
+            // Hit Test: Iterate from Top to Bottom (Reverse)
+            for (let i = layers.length - 1; i > 0; i--) {
+                const layer = layers[i];
+                if (isPixelInMask(layer.img, x, y)) {
+                    return i;
+                }
+            }
+            return 0; // Background
+        }
+
+        function handleCanvasHover(e) {
+            const hitIndex = getHitLayerIndex(e);
+
+            if (hitIndex !== hoveredLayerIndex) {
+                hoveredLayerIndex = hitIndex;
+                updateHoverLabel();
+                drawCanvas();
+            }
+
+            // Change cursor
+            canvas.style.cursor = (hitIndex > 0) ? 'pointer' : 'default';
+        }
+
+        function updateHoverLabel() {
+            const labelEl = document.getElementById('hover-label');
+            if (hoveredLayerIndex >= 0 && hoveredLayerIndex < layers.length) {
+                labelEl.innerText = layers[hoveredLayerIndex].label;
+            } else {
+                labelEl.innerText = 'None';
+            }
+        }
+
+        function handleCanvasClick(e) {
+            const hitIndex = getHitLayerIndex(e);
+            openPopup(hitIndex);
+        }
+
+        function isPixelInMask(img, x, y) {
+            // Check bounds
+            if (x < 0 || y < 0 || x >= img.naturalWidth || y >= img.naturalHeight) return false;
+
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 1;
+            tempCanvas.height = 1;
+            const tCtx = tempCanvas.getContext('2d');
+            tCtx.drawImage(img, x, y, 1, 1, 0, 0, 1, 1);
+            const pixel = tCtx.getImageData(0, 0, 1, 1).data;
+            return pixel[3] > 0;
+        }
+
+        // --- Crop Logic ---
+
+        function toggleCropMode() {
+            isCropMode = !isCropMode;
+            document.getElementById('crop-controls').style.display = isCropMode ? 'flex' : 'none';
+            if (isCropMode) {
+                // Initialize crop rect centered
+                const w = canvas.width * 0.8;
+                const h = canvas.height * 0.8;
+                cropRect = {
+                    x: (canvas.width - w) / 2,
+                    y: (canvas.height - h) / 2,
+                    w: w,
+                    h: h
+                };
+                setCropRatio(null);
+            }
+            drawCanvas();
+        }
+
+        function setCropRatio(ratio) {
+            cropRatio = ratio;
+            if (ratio) {
+                // Adjust height to match ratio
+                const currentArea = cropRect.w * cropRect.h;
+                // Try to keep area similar or width constant?
+                // Let's keep width constant if possible
+                cropRect.h = cropRect.w / ratio;
+
+                // If height exceeds canvas, scale down
+                if (cropRect.h > canvas.height) {
+                    cropRect.h = canvas.height * 0.9;
+                    cropRect.w = cropRect.h * ratio;
+                }
+
+                // Re-center
+                cropRect.x = (canvas.width - cropRect.w) / 2;
+                cropRect.y = (canvas.height - cropRect.h) / 2;
+            }
+            drawCanvas();
+        }
+
+        function updateCropScale(val) {
+            const scale = parseFloat(val);
+            // Scale relative to canvas size
+            let w, h;
+            if (cropRatio) {
+                // Use ratio
+                if (canvas.width / canvas.height > cropRatio) {
+                    // Canvas is wider than ratio
+                    h = canvas.height * scale;
+                    w = h * cropRatio;
+                } else {
+                    w = canvas.width * scale;
+                    h = w / cropRatio;
+                }
+            } else {
+                // Free aspect (keep current aspect)
+                const currentRatio = cropRect.w / cropRect.h;
+                w = canvas.width * scale;
+                h = w / currentRatio;
+            }
+
+            cropRect.w = w;
+            cropRect.h = h;
+            cropRect.x = (canvas.width - w) / 2;
+            cropRect.y = (canvas.height - h) / 2;
+            drawCanvas();
+        }
+
+        function handleCropDown(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            // Check if inside crop rect
+            if (x >= cropRect.x && x <= cropRect.x + cropRect.w &&
+                y >= cropRect.y && y <= cropRect.y + cropRect.h) {
+                isDraggingCrop = true;
+                dragStart = { x, y };
+                cropStart = { x: cropRect.x, y: cropRect.y };
+            }
+        }
+
+        function handleCropMove(e) {
+            if (!isDraggingCrop) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            const dx = x - dragStart.x;
+            const dy = y - dragStart.y;
+
+            cropRect.x = cropStart.x + dx;
+            cropRect.y = cropStart.y + dy;
+
+            // Constrain to canvas
+            if (cropRect.x < 0) cropRect.x = 0;
+            if (cropRect.y < 0) cropRect.y = 0;
+            if (cropRect.x + cropRect.w > canvas.width) cropRect.x = canvas.width - cropRect.w;
+            if (cropRect.y + cropRect.h > canvas.height) cropRect.y = canvas.height - cropRect.h;
+
+            drawCanvas();
+        }
+
+        function applyCrop() {
+            // Update cropOffset and Canvas Size
+            cropOffset.x += cropRect.x;
+            cropOffset.y += cropRect.y;
+
+            canvas.width = cropRect.w;
+            canvas.height = cropRect.h;
+
+            isCropMode = false;
+            document.getElementById('crop-controls').style.display = 'none';
+            drawCanvas();
+        }
+
+        function cancelCrop() {
+            isCropMode = false;
+            document.getElementById('crop-controls').style.display = 'none';
+            drawCanvas();
+        }
+
+        // --- Popup Logic ---
+        function openPopup(layerIndex) {
+            selectedLayerIndex = layerIndex;
+            const layer = layers[layerIndex];
+            document.getElementById('popup-title').innerText = 'Edit: ' + layer.label;
+            document.getElementById('popup-overlay').style.display = 'flex';
+
+            // Reset inputs
+            document.getElementById('popup-color-input').value = layer.color;
+            document.getElementById('popup-file-input').value = '';
+        }
+
+        function closePopup(e) {
+            if (e && e.target.id !== 'popup-overlay' && e.target.className !== 'close-btn') return;
+            document.getElementById('popup-overlay').style.display = 'none';
+        }
+
+        function triggerColorPicker() {
+            document.getElementById('popup-color-input').click();
+        }
+
+        function triggerFilePicker() {
+            document.getElementById('popup-file-input').click();
+        }
+
+        function applyColor(hex) {
+            if (selectedLayerIndex >= 0) {
+                layers[selectedLayerIndex].color = hex;
+                layers[selectedLayerIndex].texture = null; // Remove texture if color selected
+                drawCanvas();
+                // Don't close popup immediately, let user see change? 
+                // Or close it? Let's keep it open.
+            }
+        }
+
+        function applyTexture(input) {
+            if (input.files && input.files[0] && selectedLayerIndex >= 0) {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.onload = () => {
+                        layers[selectedLayerIndex].texture = img;
+                        drawCanvas();
+                        document.getElementById('popup-overlay').style.display = 'none';
+                    };
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        function downloadResult() {
+            const link = document.createElement('a');
+            link.download = 'segmented_composition.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+    </script>
+</body>
+
+</html>
