@@ -276,7 +276,8 @@
 
         /* Hidden inputs */
         #popup-color-input,
-        #popup-file-input {
+        #popup-file-input,
+        #popup-video-input {
             display: none;
         }
 
@@ -346,31 +347,24 @@
                     <span>Hovering:</span>
                     <span id="hover-label">None</span>
                 </div>
+                <div style="width: 1px; height: 20px; background: #555; margin: 0 10px;"></div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <span>Ref Opacity:</span>
+                    <input type="range" min="0" max="1" step="0.1" value="0" oninput="updateRefOpacity(this.value)"
+                        style="width: 100px;">
+                </div>
             </div>
 
-            <canvas id="main-canvas"></canvas>
+            <div id="composition-wrapper" style="position: relative; display: inline-block;">
+                <div id="composition-container"></div>
+                <!-- Hidden canvas for hit testing only -->
+                <canvas id="hit-test-canvas" style="display: none;"></canvas>
+            </div>
 
             <div class="action-bar" style="display: flex; gap: 10px; margin-top: 10px;">
-                <button class="action-btn" onclick="toggleCropMode()">Crop Image</button>
+                <button class="action-btn" onclick="toggleDrawingMode()">✏️ Draw Shape</button>
                 <button class="action-btn" onclick="downloadResult()">Extract Image</button>
-            </div>
-
-            <!-- Crop Controls -->
-            <div id="crop-controls"
-                style="display: none; background: #333; padding: 15px; border-radius: 8px; margin-top: 10px; gap: 15px; align-items: center;">
-                <span style="font-weight: bold;">Crop Format:</span>
-                <button class="crop-btn" onclick="setCropRatio(null)">Free</button>
-                <button class="crop-btn" onclick="setCropRatio(16/9)">16:9</button>
-                <button class="crop-btn" onclick="setCropRatio(4/3)">4:3</button>
-                <button class="crop-btn" onclick="setCropRatio(1)">1:1</button>
-
-                <span style="margin-left: 10px;">Scale:</span>
-                <input type="range" id="crop-scale" min="0.1" max="1" step="0.05" value="0.8"
-                    oninput="updateCropScale(this.value)">
-
-                <button class="action-btn" style="background-color: #007acc; margin-left: auto;"
-                    onclick="applyCrop()">Apply</button>
-                <button class="action-btn" style="background-color: #666;" onclick="cancelCrop()">Cancel</button>
+                <button class="action-btn" onclick="toggleFullscreen()">Fullscreen</button>
             </div>
         </div>
 
@@ -381,6 +375,12 @@
         <div class="popup-content" onclick="event.stopPropagation()">
             <span class="close-btn" onclick="closePopup()">&times;</span>
             <div class="popup-header" id="popup-title">Edit Layer</div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; color: #aaa;">Name:</label>
+                <input type="text" id="popup-name-input" onchange="applyName(this.value)"
+                    style="width: 100%; padding: 8px; background: #333; border: 1px solid #555; color: white; border-radius: 4px;">
+            </div>
 
             <div class="popup-options">
                 <!-- Option 1: Color -->
@@ -394,14 +394,73 @@
                     <div class="option-icon">🖼️</div>
                     <div>Image Texture</div>
                 </div>
+
+                <!-- Option 3: Video -->
+                <div class="option-card" onclick="triggerVideoPicker()">
+                    <div class="option-icon">🎥</div>
+                    <div>Video Texture</div>
+                </div>
             </div>
 
             <input type="color" id="popup-color-input" onchange="applyColor(this.value)">
             <input type="file" id="popup-file-input" accept="image/*" onchange="applyTexture(this)">
+            <input type="file" id="popup-video-input" accept="video/*" onchange="applyVideo(this)">
         </div>
     </div>
 
     <style>
+        #composition-container {
+            background-image: linear-gradient(45deg, #2a2a2a 25%, transparent 25%),
+                linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
+                linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
+            background-size: 20px 20px;
+            background-color: #1a1a1a;
+            border: 2px solid #444;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            /* Let JS handle hit testing */
+            transition: transform 0.1s ease;
+        }
+
+        /* Only scale on hover if NOT in fullscreen */
+        #composition-container:not(:fullscreen) .layer.hovered {
+            transform: scale(1.02);
+            /* Slight scale on hover */
+            z-index: 1000 !important;
+            /* Bring to front visually? Maybe not, might break stacking context */
+            filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.5));
+        }
+
+        .layer-content {
+            width: 100%;
+            height: 100%;
+            /* Masking magic */
+            -webkit-mask-size: 100% 100%;
+            mask-size: 100% 100%;
+            -webkit-mask-repeat: no-repeat;
+            mask-repeat: no-repeat;
+            -webkit-mask-position: center;
+            mask-position: center;
+        }
+
+        .layer-content video,
+        .layer-content img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
         .crop-btn {
             background: #444;
             color: white;
@@ -418,48 +477,139 @@
 
     <script>
         // State
-        let layers = []; // { id, type: 'bg'|'object', label, img: Image, color: hex, texture: Image, bbox: {x,y,w,h} }
+        let layers = []; // { id, type: 'bg'|'object', label, img: Image, color: hex, texture: Image, videoUrl: string, bbox: {x,y,w,h} }
         let hoveredLayerIndex = -1;
         let selectedLayerIndex = -1; // For popup context
-        let canvas, ctx;
+        let canvas, ctx; // Used for hit testing and crop overlay only
         let originalWidth = 0, originalHeight = 0;
+        let refOpacity = 0;
 
-        // Crop State
-        let isCropMode = false;
-        let cropRect = { x: 0, y: 0, w: 0, h: 0 };
-        let cropRatio = null; // null = free
-        let isDraggingCrop = false;
-        let dragStart = { x: 0, y: 0 };
-        let cropStart = { x: 0, y: 0 };
+        // View State (Zoom/Pan)
+        let viewState = { scale: 1, x: 0, y: 0 };
+        let isPanning = false;
+        let panStart = { x: 0, y: 0 };
+        let viewStart = { x: 0, y: 0 };
+
+        // Drawing State
+        let isDrawing = false;
+        let drawingPoints = []; // {x, y} in image space
+
+        let cropOffset = { x: 0, y: 0 }; // Offset for the view (legacy support if needed, or remove)
         let finalCropRect = null; // Stores the applied crop
         let currentFilename = "{{ original_image }}";
+        let currentImageTimestamp = Date.now();
 
         // Initialize
         window.onload = () => {
-            canvas = document.getElementById('main-canvas');
-            ctx = canvas.getContext('2d');
+            // We use the container for events now
+            const container = document.getElementById('composition-container');
 
-            // Setup Canvas Listeners
-            canvas.addEventListener('mousemove', (e) => {
-                if (isCropMode) handleCropMove(e);
-                else handleCanvasHover(e);
+            // Setup Listeners on Container
+            container.addEventListener('mousemove', (e) => {
+                if (isDrawing) handleDrawingMove(e);
+                else if (isPanning) handlePanMove(e);
+                else handleContainerHover(e);
             });
-            canvas.addEventListener('mousedown', (e) => {
-                if (isCropMode) handleCropDown(e);
-                else handleCanvasClick(e);
+            container.addEventListener('mousedown', (e) => {
+                if (isDrawing) handleDrawingClick(e);
+                else handlePanDown(e);
             });
-            canvas.addEventListener('mouseup', () => {
-                if (isCropMode) isDraggingCrop = false;
+            container.addEventListener('mouseup', (e) => {
+                handlePanUp(e);
             });
-            canvas.addEventListener('mouseleave', () => {
-                hoveredLayerIndex = -1;
-                isDraggingCrop = false;
-                if (!isCropMode) {
-                    updateHoverLabel();
-                    drawCanvas();
+            container.addEventListener('contextmenu', (e) => {
+                if (isDrawing) {
+                    e.preventDefault();
+                    finishDrawing();
                 }
             });
+            container.addEventListener('mouseleave', () => {
+                hoveredLayerIndex = -1;
+                isPanning = false;
+                updateHoverLabel();
+                const layerEl = document.querySelector('.layer.hovered');
+                if (layerEl) layerEl.classList.remove('hovered');
+            });
+
+            // Zoom Listener
+            container.addEventListener('wheel', handleWheel, { passive: false });
+
+            // Fullscreen Listener
+            document.addEventListener('fullscreenchange', updateTransform);
         };
+
+        // --- Zoom / Pan Logic ---
+
+        function handleWheel(e) {
+            if (!document.fullscreenElement) return;
+            e.preventDefault();
+            const container = document.getElementById('composition-container');
+            const rect = container.getBoundingClientRect();
+
+            // Mouse position relative to container
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            // Calculate mouse position in "World Space" (before scale/translate)
+            // worldX = (mx - viewState.x) / viewState.scale
+            const worldX = (mx - viewState.x) / viewState.scale;
+            const worldY = (my - viewState.y) / viewState.scale;
+
+            // Update Scale
+            const zoomIntensity = 0.1;
+            const delta = e.deltaY > 0 ? -zoomIntensity : zoomIntensity;
+            const newScale = Math.max(0.1, Math.min(10, viewState.scale * (1 + delta)));
+
+            // Update Position to keep mouse over same world point
+            // mx = worldX * newScale + newX
+            // newX = mx - worldX * newScale
+            viewState.x = mx - worldX * newScale;
+            viewState.y = my - worldY * newScale;
+            viewState.scale = newScale;
+
+            updateTransform();
+        }
+
+        function handlePanDown(e) {
+            isPanning = true;
+            panStart = { x: e.clientX, y: e.clientY };
+            viewStart = { x: viewState.x, y: viewState.y };
+            // Don't prevent default yet, might be a click
+        }
+
+        function handlePanMove(e) {
+            if (!isPanning) return;
+            if (!document.fullscreenElement) return;
+            const dx = e.clientX - panStart.x;
+            const dy = e.clientY - panStart.y;
+
+            viewState.x = viewStart.x + dx;
+            viewState.y = viewStart.y + dy;
+
+            updateTransform();
+        }
+
+        function handlePanUp(e) {
+            if (!isPanning) return;
+            isPanning = false;
+
+            // If moved less than threshold, treat as click
+            const dist = Math.hypot(e.clientX - panStart.x, e.clientY - panStart.y);
+            if (dist < 5) {
+                handleContainerClick(e);
+            }
+        }
+
+        function updateTransform() {
+            const group = document.getElementById('transform-group');
+            if (group) {
+                if (document.fullscreenElement) {
+                    group.style.transform = `translate(${viewState.x}px, ${viewState.y}px) scale(${viewState.scale})`;
+                } else {
+                    group.style.transform = `translate(0px, 0px) scale(1)`;
+                }
+            }
+        }
 
         async function uploadImage() {
             const input = document.getElementById('imageInput');
@@ -478,13 +628,20 @@
 
                 if (data.success) {
                     currentFilename = data.filename;
+                    currentImageTimestamp = Date.now();
                     // Update image src with timestamp to force reload
-                    document.getElementById('original-img').src = '/static/' + data.filename + '?t=' + new Date().getTime();
+                    document.getElementById('original-img').src = '/static/' + data.filename + '?t=' + currentImageTimestamp;
 
                     // Reset Editor
                     document.getElementById('editor-section').style.display = 'none';
                     layers = [];
-                    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    document.getElementById('composition-container').innerHTML = '';
+
+                    // Reset View State? User said "be the starting position".
+                    // If we want to persist across uploads, do nothing.
+                    // If we want to reset to center, do that.
+                    // "beim öffnen des vollbilds die ausgangsposition sein" -> implies saved state is used.
+                    // So we keep viewState as is.
                 } else {
                     alert('Upload failed: ' + data.error);
                 }
@@ -542,7 +699,9 @@
                 color: '#333333', // Default dark grey
                 img: null,
                 texture: null,
-                bbox: null
+                videoUrl: null,
+                bbox: null,
+                maskUrl: null
             });
 
             // 2. Load Object Masks
@@ -554,8 +713,10 @@
                         type: 'object',
                         label: maskInfo.label,
                         color: getRandomColor(),
-                        img: img,
+                        img: img, // Keep for hit testing
+                        maskUrl: '/static/' + maskInfo.url, // For CSS mask
                         texture: null,
+                        videoUrl: null,
                         bbox: maskInfo.bbox // {x, y, w, h}
                     });
                     img.onerror = reject;
@@ -565,115 +726,223 @@
             const objectLayers = await Promise.all(imagePromises);
             layers = layers.concat(objectLayers);
 
-            // Set Canvas Size
+            // Set Container Size
+            const container = document.getElementById('composition-container');
             if (objectLayers.length > 0) {
                 originalWidth = objectLayers[0].img.naturalWidth;
                 originalHeight = objectLayers[0].img.naturalHeight;
-                canvas.width = originalWidth;
-                canvas.height = originalHeight;
             } else {
                 const origImg = document.getElementById('original-img');
-                canvas.width = origImg.naturalWidth || 640;
-                canvas.height = origImg.naturalHeight || 480;
-                originalWidth = canvas.width;
-                originalHeight = canvas.height;
+                originalWidth = origImg.naturalWidth || 640;
+                originalHeight = origImg.naturalHeight || 480;
             }
 
-            drawCanvas();
+            // Container itself is the viewport, so it can be fixed size or flexible.
+            // But the content inside needs to be original size.
+            // We set container to match original size initially, but CSS limits it.
+            container.style.width = originalWidth + 'px';
+            container.style.height = originalHeight + 'px';
+
+            // Setup Hit Test Canvas (invisible)
+            canvas = document.getElementById('hit-test-canvas');
+            canvas.width = originalWidth;
+            canvas.height = originalHeight;
+            ctx = canvas.getContext('2d');
+
+            renderLayers();
         }
 
-        function drawCanvas() {
-            // Clear
+        function renderLayers() {
+            const container = document.getElementById('composition-container');
+            if (!container) return;
+
+            try {
+                container.innerHTML = ''; // Clear DOM
+
+                // Safety checks for global variables
+                const vx = (typeof viewState !== 'undefined' && viewState) ? viewState.x : 0;
+                const vy = (typeof viewState !== 'undefined' && viewState) ? viewState.y : 0;
+                const vs = (typeof viewState !== 'undefined' && viewState) ? viewState.scale : 1;
+
+                const cx = (typeof cropOffset !== 'undefined' && cropOffset) ? cropOffset.x : 0;
+                const cy = (typeof cropOffset !== 'undefined' && cropOffset) ? cropOffset.y : 0;
+
+                // Create Transform Group (Zoom/Pan)
+                let transformGroup = document.createElement('div');
+                transformGroup.id = 'transform-group';
+                transformGroup.style.transformOrigin = '0 0';
+                transformGroup.style.width = '100%';
+                transformGroup.style.height = '100%';
+                // Apply current view state
+                if (document.fullscreenElement) {
+                    transformGroup.style.transform = `translate(${vx}px, ${vy}px) scale(${vs})`;
+                } else {
+                    transformGroup.style.transform = `translate(0px, 0px) scale(1)`;
+                }
+                container.appendChild(transformGroup);
+
+                // Create Content Wrapper (Crop Offset)
+                let contentWrapper = document.createElement('div');
+                contentWrapper.id = 'content-wrapper';
+                contentWrapper.style.position = 'absolute';
+                contentWrapper.style.width = originalWidth + 'px';
+                contentWrapper.style.height = originalHeight + 'px';
+                contentWrapper.style.transform = `translate(${-cx}px, ${-cy}px)`;
+                transformGroup.appendChild(contentWrapper);
+
+                // Update Container Size
+                if (typeof finalCropRect !== 'undefined' && finalCropRect) {
+                    container.style.width = finalCropRect.w + 'px';
+                    container.style.height = finalCropRect.h + 'px';
+                } else {
+                    container.style.width = originalWidth + 'px';
+                    container.style.height = originalHeight + 'px';
+                }
+
+                // Render Layers
+                layers.forEach((layer, index) => {
+                    const layerEl = document.createElement('div');
+                    layerEl.className = 'layer';
+                    layerEl.id = `layer-${index}`;
+                    layerEl.style.zIndex = index;
+
+                    if (index === hoveredLayerIndex) {
+                        layerEl.classList.add('hovered');
+                    }
+
+                    // Apply Mask
+                    if (layer.type === 'object' && layer.maskUrl) {
+                        layerEl.style.maskImage = `url(${layer.maskUrl})`;
+                        layerEl.style.webkitMaskImage = `url(${layer.maskUrl})`;
+                    }
+
+                    const contentEl = document.createElement('div');
+                    contentEl.className = 'layer-content';
+
+                    // Content Logic
+                    if (layer.videoUrl) {
+                        const video = document.createElement('video');
+                        video.src = layer.videoUrl;
+                        video.autoplay = true;
+                        video.loop = true;
+                        video.muted = true;
+                        contentEl.appendChild(video);
+                    } else if (layer.texture) {
+                        // Texture Image
+                        const img = document.createElement('img');
+                        img.src = layer.texture.src;
+                        contentEl.appendChild(img);
+                    } else {
+                        // Solid Color
+                        contentEl.style.backgroundColor = layer.color;
+                    }
+
+                    layerEl.appendChild(contentEl);
+                    contentWrapper.appendChild(layerEl);
+                });
+
+                // Add Reference Image Overlay
+                const refImg = document.createElement('img');
+                refImg.id = 'ref-overlay-img';
+                const fName = (typeof currentFilename !== 'undefined') ? currentFilename : '';
+                const ts = (typeof currentImageTimestamp !== 'undefined') ? currentImageTimestamp : Date.now();
+                refImg.src = '/static/' + fName + '?t=' + ts;
+                refImg.style.position = 'absolute';
+                refImg.style.top = '0';
+                refImg.style.left = '0';
+                refImg.style.width = '100%';
+                refImg.style.height = '100%';
+                refImg.style.objectFit = 'contain';
+                refImg.style.opacity = (typeof refOpacity !== 'undefined') ? refOpacity : 0;
+                refImg.style.pointerEvents = 'none';
+                refImg.style.zIndex = 9999;
+                contentWrapper.appendChild(refImg);
+
+                // Drawing Overlay
+                if (isDrawing) {
+                    const drawCanvas = document.createElement('canvas');
+                    drawCanvas.id = 'drawing-canvas';
+                    drawCanvas.width = originalWidth;
+                    drawCanvas.height = originalHeight;
+                    drawCanvas.style.position = 'absolute';
+                    drawCanvas.style.top = '0';
+                    drawCanvas.style.left = '0';
+                    drawCanvas.style.zIndex = 10000;
+                    drawCanvas.style.pointerEvents = 'none';
+
+                    contentWrapper.appendChild(drawCanvas);
+                    updateDrawingCanvas(null, drawCanvas);
+                }
+            } catch (e) {
+                console.error("Render error:", e);
+                const errDiv = document.getElementById('error-msg');
+                if (errDiv) errDiv.innerText = "Render error: " + e.message;
+            }
+        }
+
+        function updateDrawingCanvas(currentMousePt, canvas) {
+            if (!canvas) canvas = document.getElementById('drawing-canvas');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            ctx.save();
-            // Apply Crop Offset
-            ctx.translate(-cropOffset.x, -cropOffset.y);
+            if (drawingPoints.length === 0 && !currentMousePt) return;
 
-            // Draw Layers from Bottom to Top
-            layers.forEach((layer, index) => {
-                const isHovered = (index === hoveredLayerIndex);
-
-                ctx.save();
-
-                // Apply Hover Scale (Only for objects)
-                if (isHovered && layer.type === 'object' && layer.bbox) {
-                    const cx = layer.bbox.x + layer.bbox.w / 2;
-                    const cy = layer.bbox.y + layer.bbox.h / 2;
-
-                    ctx.translate(cx, cy);
-                    ctx.scale(1.05, 1.05); // 5% scale up
-                    ctx.translate(-cx, -cy);
-                }
-
-                if (layer.type === 'background') {
-                    if (layer.texture) {
-                        // Draw texture pattern
-                        const pattern = ctx.createPattern(layer.texture, 'repeat');
-                        ctx.fillStyle = pattern;
-                    } else {
-                        ctx.fillStyle = layer.color;
-                    }
-                    // Draw background over the entire ORIGINAL area
-                    ctx.fillRect(0, 0, originalWidth, originalHeight);
-                } else {
-                    // Draw Object Mask
-                    const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = originalWidth;
-                    tempCanvas.height = originalHeight;
-                    const tCtx = tempCanvas.getContext('2d');
-
-                    // 1. Draw the mask shape
-                    tCtx.drawImage(layer.img, 0, 0);
-
-                    // 2. Composite: Source-In
-                    tCtx.globalCompositeOperation = 'source-in';
-
-                    if (layer.texture) {
-                        const pattern = tCtx.createPattern(layer.texture, 'repeat');
-                        tCtx.fillStyle = pattern;
-                        tCtx.fillRect(0, 0, originalWidth, originalHeight);
-                    } else {
-                        tCtx.fillStyle = layer.color;
-                        tCtx.fillRect(0, 0, originalWidth, originalHeight);
-                    }
-
-                    // 3. Draw result to main canvas
-                    ctx.drawImage(tempCanvas, 0, 0);
-                }
-
-                ctx.restore();
-            });
-
-            ctx.restore(); // Restore translation
-
-            if (isCropMode) {
-                drawCropOverlay();
-            }
-        }
-
-        function drawCropOverlay() {
-            ctx.save();
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-            ctx.beginPath();
-            ctx.rect(0, 0, canvas.width, canvas.height);
-            ctx.rect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
-            ctx.clip('evenodd');
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.restore();
-
-            ctx.strokeStyle = '#fff';
+            ctx.strokeStyle = '#00ff00';
             ctx.lineWidth = 2;
-            ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
+            ctx.beginPath();
+
+            if (drawingPoints.length > 0) {
+                ctx.moveTo(drawingPoints[0].x, drawingPoints[0].y);
+                for (let i = 1; i < drawingPoints.length; i++) {
+                    ctx.lineTo(drawingPoints[i].x, drawingPoints[i].y);
+                }
+                // Draw line to current mouse
+                if (currentMousePt) {
+                    ctx.lineTo(currentMousePt.x, currentMousePt.y);
+                }
+            } else if (currentMousePt) {
+                // Just starting
+                ctx.moveTo(currentMousePt.x, currentMousePt.y);
+            }
+
+            ctx.stroke();
+
+            // Draw points
+            ctx.fillStyle = '#00ff00';
+            for (let i = 0; i < drawingPoints.length; i++) {
+                ctx.beginPath();
+                ctx.arc(drawingPoints[i].x, drawingPoints[i].y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
 
         function getHitLayerIndex(e) {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
+            const container = document.getElementById('composition-container');
+            const rect = container.getBoundingClientRect();
 
-            const x = (e.clientX - rect.left) * scaleX + cropOffset.x;
-            const y = (e.clientY - rect.top) * scaleY + cropOffset.y;
+            // Mouse in Viewport
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            // Determine current view transform
+            let vx = 0, vy = 0, vscale = 1;
+            if (document.fullscreenElement) {
+                vx = viewState.x;
+                vy = viewState.y;
+                vscale = viewState.scale;
+            }
+
+            // Transform to World Space (Zoom/Pan)
+            // worldX = (mx - vx) / vscale
+            const worldX = (mx - vx) / vscale;
+            const worldY = (my - vy) / vscale;
+
+            // Transform to Image Space (Crop Offset)
+            // imageX = worldX + cropOffset.x
+            const x = worldX + cropOffset.x;
+            const y = worldY + cropOffset.y;
 
             // Hit Test: Iterate from Top to Bottom (Reverse)
             for (let i = layers.length - 1; i > 0; i--) {
@@ -685,29 +954,29 @@
             return 0; // Background
         }
 
-        function handleCanvasHover(e) {
+        function handleContainerHover(e) {
             const hitIndex = getHitLayerIndex(e);
 
             if (hitIndex !== hoveredLayerIndex) {
+                // Remove old hover class
+                const oldEl = document.getElementById(`layer-${hoveredLayerIndex}`);
+                if (oldEl) oldEl.classList.remove('hovered');
+
                 hoveredLayerIndex = hitIndex;
                 updateHoverLabel();
-                drawCanvas();
+
+                // Add new hover class (skip background at index 0)
+                if (hoveredLayerIndex > 0) {
+                    const newEl = document.getElementById(`layer-${hoveredLayerIndex}`);
+                    if (newEl) newEl.classList.add('hovered');
+                }
             }
 
-            // Change cursor
-            canvas.style.cursor = (hitIndex > 0) ? 'pointer' : 'default';
+            const container = document.getElementById('composition-container');
+            container.style.cursor = (hitIndex > 0) ? 'pointer' : 'default';
         }
 
-        function updateHoverLabel() {
-            const labelEl = document.getElementById('hover-label');
-            if (hoveredLayerIndex >= 0 && hoveredLayerIndex < layers.length) {
-                labelEl.innerText = layers[hoveredLayerIndex].label;
-            } else {
-                labelEl.innerText = 'None';
-            }
-        }
-
-        function handleCanvasClick(e) {
+        function handleContainerClick(e) {
             const hitIndex = getHitLayerIndex(e);
             openPopup(hitIndex);
         }
@@ -716,142 +985,142 @@
             // Check bounds
             if (x < 0 || y < 0 || x >= img.naturalWidth || y >= img.naturalHeight) return false;
 
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = 1;
-            tempCanvas.height = 1;
-            const tCtx = tempCanvas.getContext('2d');
-            tCtx.drawImage(img, x, y, 1, 1, 0, 0, 1, 1);
-            const pixel = tCtx.getImageData(0, 0, 1, 1).data;
-            return pixel[3] > 0;
-        }
-
-        // --- Crop Logic ---
-
-        function toggleCropMode() {
-            isCropMode = !isCropMode;
-            document.getElementById('crop-controls').style.display = isCropMode ? 'flex' : 'none';
-            if (isCropMode) {
-                // Initialize crop rect centered
-                const w = canvas.width * 0.8;
-                const h = canvas.height * 0.8;
-                cropRect = {
-                    x: (canvas.width - w) / 2,
-                    y: (canvas.height - h) / 2,
-                    w: w,
-                    h: h
-                };
-                setCropRatio(null);
+            // Use the hidden canvas for pixel reading
+            const tCtx = ctx; // Use global hidden ctx
+            tCtx.clearRect(0, 0, 1, 1);
+            // Draw the specific pixel from the source image to 0,0 on canvas
+            try {
+                tCtx.drawImage(img, x, y, 1, 1, 0, 0, 1, 1);
+                const pixel = tCtx.getImageData(0, 0, 1, 1).data;
+                return pixel[3] > 0; // Alpha > 0
+            } catch (err) {
+                console.error("Hit test error:", err);
+                return false;
             }
-            drawCanvas();
         }
 
-        function setCropRatio(ratio) {
-            cropRatio = ratio;
-            if (ratio) {
-                // Adjust height to match ratio
-                const currentArea = cropRect.w * cropRect.h;
-                // Try to keep area similar or width constant?
-                // Let's keep width constant if possible
-                cropRect.h = cropRect.w / ratio;
+        function toggleDrawingMode() {
+            isDrawing = !isDrawing;
+            drawingPoints = [];
+            renderLayers();
 
-                // If height exceeds canvas, scale down
-                if (cropRect.h > canvas.height) {
-                    cropRect.h = canvas.height * 0.9;
-                    cropRect.w = cropRect.h * ratio;
-                }
-
-                // Re-center
-                cropRect.x = (canvas.width - cropRect.w) / 2;
-                cropRect.y = (canvas.height - cropRect.h) / 2;
-            }
-            drawCanvas();
+            // Update cursor
+            const container = document.getElementById('composition-container');
+            container.style.cursor = isDrawing ? 'crosshair' : 'default';
         }
 
-        function updateCropScale(val) {
-            const scale = parseFloat(val);
-            // Scale relative to canvas size
-            let w, h;
-            if (cropRatio) {
-                // Use ratio
-                if (canvas.width / canvas.height > cropRatio) {
-                    // Canvas is wider than ratio
-                    h = canvas.height * scale;
-                    w = h * cropRatio;
+        function handleDrawingMove(e) {
+            if (!isDrawing) return;
+            const pt = getMouseInImageSpace(e);
+            updateDrawingCanvas(pt);
+        }
+
+        function handleDrawingClick(e) {
+            if (!isDrawing) return;
+            const pt = getMouseInImageSpace(e);
+            drawingPoints.push(pt);
+
+            let canvas = document.getElementById('drawing-canvas');
+            if (!canvas) {
+                // Try to find contentWrapper and append canvas manually
+                const contentWrapper = document.getElementById('content-wrapper');
+                if (contentWrapper) {
+                    canvas = document.createElement('canvas');
+                    canvas.id = 'drawing-canvas';
+                    canvas.width = originalWidth;
+                    canvas.height = originalHeight;
+                    canvas.style.position = 'absolute';
+                    canvas.style.top = '0';
+                    canvas.style.left = '0';
+                    canvas.style.zIndex = 10000;
+                    canvas.style.pointerEvents = 'none';
+                    contentWrapper.appendChild(canvas);
                 } else {
-                    w = canvas.width * scale;
-                    h = w / cropRatio;
+                    // If contentWrapper is missing, we must re-render
+                    renderLayers();
+                    return;
                 }
-            } else {
-                // Free aspect (keep current aspect)
-                const currentRatio = cropRect.w / cropRect.h;
-                w = canvas.width * scale;
-                h = w / currentRatio;
+            }
+            updateDrawingCanvas(null, canvas);
+            if (drawingPoints.length === 0) return;
+
+            updateDrawingCanvas(pt);
+        }
+
+        function getMouseInImageSpace(e) {
+            const container = document.getElementById('composition-container');
+            const rect = container.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            let vx = 0, vy = 0, vscale = 1;
+            if (document.fullscreenElement) {
+                vx = viewState.x;
+                vy = viewState.y;
+                vscale = viewState.scale;
             }
 
-            cropRect.w = w;
-            cropRect.h = h;
-            cropRect.x = (canvas.width - w) / 2;
-            cropRect.y = (canvas.height - h) / 2;
-            drawCanvas();
+            const worldX = (mx - vx) / vscale;
+            const worldY = (my - vy) / vscale;
+
+            return { x: worldX + cropOffset.x, y: worldY + cropOffset.y };
         }
 
-        function handleCropDown(e) {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-
-            // Check if inside crop rect
-            if (x >= cropRect.x && x <= cropRect.x + cropRect.w &&
-                y >= cropRect.y && y <= cropRect.y + cropRect.h) {
-                isDraggingCrop = true;
-                dragStart = { x, y };
-                cropStart = { x: cropRect.x, y: cropRect.y };
+        function finishDrawing() {
+            if (drawingPoints.length < 3) {
+                alert("Need at least 3 points to close a shape.");
+                return;
             }
+            isDrawing = false;
+            document.getElementById('composition-container').style.cursor = 'default';
+
+            // Generate Mask from Points
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = originalWidth;
+            maskCanvas.height = originalHeight;
+            const mCtx = maskCanvas.getContext('2d');
+
+            mCtx.fillStyle = 'white';
+            mCtx.beginPath();
+            mCtx.moveTo(drawingPoints[0].x, drawingPoints[0].y);
+            for (let i = 1; i < drawingPoints.length; i++) {
+                mCtx.lineTo(drawingPoints[i].x, drawingPoints[i].y);
+            }
+            mCtx.closePath();
+            mCtx.fill();
+
+            const maskUrl = maskCanvas.toDataURL();
+
+            // Create Image object for hit testing
+            const hitImg = new Image();
+            hitImg.src = maskUrl;
+
+            hitImg.onload = () => {
+                // Create New Layer
+                const newLayer = {
+                    type: 'object', // Treat as object
+                    label: 'New Shape',
+                    color: getRandomColor(),
+                    img: hitImg,
+                    maskUrl: maskUrl, // Data URL
+                    texture: null,
+                    videoUrl: null,
+                    bbox: null // Not needed for custom shapes really
+                };
+
+                layers.push(newLayer);
+                renderLayers();
+
+                // Open Popup for the new layer
+                openPopup(layers.length - 1);
+            };
         }
 
-        function handleCropMove(e) {
-            if (!isDraggingCrop) return;
-
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-
-            const dx = x - dragStart.x;
-            const dy = y - dragStart.y;
-
-            cropRect.x = cropStart.x + dx;
-            cropRect.y = cropStart.y + dy;
-
-            // Constrain to canvas
-            if (cropRect.x < 0) cropRect.x = 0;
-            if (cropRect.y < 0) cropRect.y = 0;
-            if (cropRect.x + cropRect.w > canvas.width) cropRect.x = canvas.width - cropRect.w;
-            if (cropRect.y + cropRect.h > canvas.height) cropRect.y = canvas.height - cropRect.h;
-
-            drawCanvas();
-        }
-
-        function applyCrop() {
-            // Update cropOffset and Canvas Size
-            cropOffset.x += cropRect.x;
-            cropOffset.y += cropRect.y;
-
-            canvas.width = cropRect.w;
-            canvas.height = cropRect.h;
-
-            isCropMode = false;
-            document.getElementById('crop-controls').style.display = 'none';
-            drawCanvas();
-        }
-
-        function cancelCrop() {
-            isCropMode = false;
-            document.getElementById('crop-controls').style.display = 'none';
-            drawCanvas();
+        function applyName(val) {
+            if (selectedLayerIndex >= 0) {
+                layers[selectedLayerIndex].label = val;
+                updateHoverLabel(); // In case we are hovering it
+            }
         }
 
         // --- Popup Logic ---
@@ -862,8 +1131,10 @@
             document.getElementById('popup-overlay').style.display = 'flex';
 
             // Reset inputs
+            document.getElementById('popup-name-input').value = layer.label;
             document.getElementById('popup-color-input').value = layer.color;
             document.getElementById('popup-file-input').value = '';
+            document.getElementById('popup-video-input').value = '';
         }
 
         function closePopup(e) {
@@ -879,13 +1150,16 @@
             document.getElementById('popup-file-input').click();
         }
 
+        function triggerVideoPicker() {
+            document.getElementById('popup-video-input').click();
+        }
+
         function applyColor(hex) {
             if (selectedLayerIndex >= 0) {
                 layers[selectedLayerIndex].color = hex;
-                layers[selectedLayerIndex].texture = null; // Remove texture if color selected
-                drawCanvas();
-                // Don't close popup immediately, let user see change? 
-                // Or close it? Let's keep it open.
+                layers[selectedLayerIndex].texture = null;
+                layers[selectedLayerIndex].videoUrl = null;
+                renderLayers();
             }
         }
 
@@ -897,7 +1171,8 @@
                     img.src = e.target.result;
                     img.onload = () => {
                         layers[selectedLayerIndex].texture = img;
-                        drawCanvas();
+                        layers[selectedLayerIndex].videoUrl = null;
+                        renderLayers();
                         document.getElementById('popup-overlay').style.display = 'none';
                     };
                 };
@@ -905,10 +1180,95 @@
             }
         }
 
+        function applyVideo(input) {
+            if (input.files && input.files[0] && selectedLayerIndex >= 0) {
+                const file = input.files[0];
+                const url = URL.createObjectURL(file);
+                layers[selectedLayerIndex].videoUrl = url;
+                layers[selectedLayerIndex].texture = null;
+                renderLayers();
+                document.getElementById('popup-overlay').style.display = 'none';
+            }
+        }
+
+        function updateRefOpacity(val) {
+            refOpacity = parseFloat(val);
+            const refImg = document.getElementById('ref-overlay-img');
+            if (refImg) {
+                refImg.style.opacity = refOpacity;
+            }
+        }
+
+        function updateHoverLabel() {
+            const labelEl = document.getElementById('hover-label');
+            if (hoveredLayerIndex >= 0 && layers[hoveredLayerIndex]) {
+                labelEl.innerText = layers[hoveredLayerIndex].label;
+            } else {
+                labelEl.innerText = 'None';
+            }
+        }
+
+        function toggleFullscreen() {
+            const elem = document.getElementById("composition-container");
+            if (!document.fullscreenElement) {
+                elem.requestFullscreen().catch(err => {
+                    alert(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
         function downloadResult() {
             const link = document.createElement('a');
             link.download = 'segmented_composition.png';
-            link.href = canvas.toDataURL('image/png');
+
+            // Reconstruct canvas for download
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = finalCropRect ? finalCropRect.w : originalWidth;
+            tempCanvas.height = finalCropRect ? finalCropRect.h : originalHeight;
+            const tCtx = tempCanvas.getContext('2d');
+
+            // Offset
+            const offX = cropOffset.x;
+            const offY = cropOffset.y;
+
+            tCtx.translate(-offX, -offY);
+
+            // Draw Background
+            tCtx.fillStyle = layers[0].color;
+            tCtx.fillRect(0, 0, originalWidth, originalHeight);
+
+            layers.forEach((layer, i) => {
+                if (i === 0) return; // Skip bg
+
+                const maskCanvas = document.createElement('canvas');
+                maskCanvas.width = originalWidth;
+                maskCanvas.height = originalHeight;
+                const mCtx = maskCanvas.getContext('2d');
+
+                mCtx.drawImage(layer.img, 0, 0);
+                mCtx.globalCompositeOperation = 'source-in';
+
+                if (layer.videoUrl) {
+                    const layerEl = document.getElementById(`layer-${i}`);
+                    const video = layerEl.querySelector('video');
+                    if (video) {
+                        mCtx.drawImage(video, 0, 0, originalWidth, originalHeight);
+                    }
+                } else if (layer.texture) {
+                    const pattern = mCtx.createPattern(layer.texture, 'repeat');
+                    mCtx.fillStyle = pattern;
+                    mCtx.fillRect(0, 0, originalWidth, originalHeight);
+                } else {
+                    mCtx.fillStyle = layer.color;
+                    mCtx.fillRect(0, 0, originalWidth, originalHeight);
+                }
+
+                tCtx.drawImage(maskCanvas, 0, 0);
+            });
+
+            link.href = tempCanvas.toDataURL('image/png');
             link.click();
         }
 
